@@ -7,3 +7,6 @@
 [submodule "server/rapidjson"]
 	path = server/rapidjson
 	url = https://github.com/scanlime/rapidjson.git
+[submodule "server/libusbp"]
+	path = server/libusbp
+	url = https://github.com/pololu/libusbp.git
