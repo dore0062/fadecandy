@@ -29,6 +29,13 @@
 #include <iostream>
 #include <fstream>
 
+// starts at -100 to not overlap with range of libusb_error
+enum teensy4DeviceError {
+    TEENSY4DEVICE_PORTNAME_NOT_READY = -100,
+    TEENSY4DEVICE_PORT_WONT_OPEN = -101,
+    TEENSY4DEVICE_DEVICE_WONT_OPEN = -102
+};
+
 class Teensy4Device : public USBDevice
 {
 public:

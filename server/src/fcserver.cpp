@@ -221,6 +221,21 @@ void FCServer::usbDeviceArrived(libusb_device *device)
                     #endif
                     break;
 
+                case TEENSY4DEVICE_PORTNAME_NOT_READY:
+                    // Try again in ~100ms or so.
+                    mPollForDevicesOnce = true;
+                    break;
+
+                case TEENSY4DEVICE_PORT_WONT_OPEN:
+                    // Try again in ~100ms or so.
+                    std::clog << "Error opening Teensy 4 Port\n";
+                    break;
+
+                case TEENSY4DEVICE_DEVICE_WONT_OPEN:
+                    // Try again in ~100ms or so.
+                    std::clog << "Error opening Teensy 4 Device\n";
+                    break;
+
                 default:
                     std::clog << "Error opening " << dev->getName() << ": " << libusb_strerror(libusb_error(r)) << "\n";
                     break;

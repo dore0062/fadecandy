@@ -25,6 +25,7 @@
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 #include "opc.h"
+#include <libusbp.hpp>
 #include <sstream>
 #include <iostream>
 #include <fstream>
@@ -37,7 +38,7 @@
 const int NUM_LIGHTS = (128*64);
 
 Teensy4Device::Teensy4Device(libusb_device *device, bool verbose)
-    : USBDevice(device, "enttec", verbose),
+    : USBDevice(device, "teensy4", verbose),
       mFoundEnttecStrings(false),
       mConfigMap(0)
 {
@@ -88,13 +89,24 @@ bool Teensy4Device::probe(libusb_device *device)
         return false;
     }
 
-    //return dd.idVendor == 0x16c0 && dd.idProduct == 0x0483; // Teensy 4.0 single sieral
-    return dd.idVendor == 0x16c0 && dd.idProduct == 0x048B; // Teensy 4.0 dual sieral
+    bool teensy4Match = false;
+
+    // Teensy single serial
+    if(dd.idVendor == 0x16c0 && dd.idProduct == 0x0483)
+        teensy4Match = true;
+
+    // Teensy dual serial
+    if(dd.idVendor == 0x16c0 && dd.idProduct == 0x048B)
+        teensy4Match = true;
+
+    return teensy4Match;
 }
 
 int Teensy4Device::open()
 {
     libusb_device_descriptor dd;
+    std::string port_name;
+
     int r = libusb_get_device_descriptor(mDevice, &dd);
     if (r < 0) {
         return r;
@@ -111,51 +123,69 @@ int Teensy4Device::open()
      * have a unique vendor/product ID.
      */
 
-//    if (dd.iManufacturer && dd.iProduct && dd.iSerialNumber) {
-    if (dd.iManufacturer && dd.iProduct) {
+    if (dd.iManufacturer && dd.iProduct && dd.iSerialNumber) {
         char manufacturer[256];
         char product[256];
+        char serialnumber[256];
 
         r = libusb_get_string_descriptor_ascii(mHandle, dd.iManufacturer, (uint8_t*)manufacturer, sizeof manufacturer);
         if (r < 0) {
             return r;
         }
-#if 1
+
         r = libusb_get_string_descriptor_ascii(mHandle, dd.iProduct, (uint8_t*)product, sizeof product);
         if (r < 0) {
             return r;
         }
 
-        //mFoundEnttecStrings = !strcmp(manufacturer, "Teensyduino") && !strcmp(product, "USB Serial"); // Teensy 4.0 Single Serial
-        mFoundEnttecStrings = !strcmp(manufacturer, "Teensyduino") && !strcmp(product, "Dual Serial");  // Teensy 4.0 Dual Serial
-#else
-        mFoundEnttecStrings = !strcmp(manufacturer, "Teensyduino");
-#endif
+        r = libusb_get_string_descriptor_ascii(mHandle, dd.iSerialNumber, (uint8_t*)serialnumber, sizeof serialnumber);
+        if (r < 0) {
+            return r;
+        }
+
+        libusbp::device device2;
+        device2 = libusbp::find_device_with_vid_pid_sn(0x16c0, 0x048B, serialnumber);
+
+        if (!device2) {
+            return TEENSY4DEVICE_DEVICE_WONT_OPEN;
+        }
+
+        try {
+            // Teensy 4 interface 0 is what we need, composite setting doesn't matter, it returns the same value
+            libusbp::serial_port port(device2, 0, false);
+            port_name = port.get_name();
+        }
+        catch (const libusbp::error & error) {
+            // this shouldn't be a hard error, just a temp issue hopefully, but print this for debugging until it's shown to be stable
+            std::clog << "can't get port_name, error: " << error.message() << "\n";
+            return TEENSY4DEVICE_PORTNAME_NOT_READY;
+        }
+
+        std::clog << "port_name: " << port_name << "\n";
+
+        // Teensy Single Serial
+        if(!strcmp(manufacturer, "Teensyduino") && !strcmp(product,"USB Serial"))
+            mFoundEnttecStrings = true;
+        
+        // Teensy Dual Serial
+        if(!strcmp(manufacturer, "Teensyduino") && !strcmp(product, "Dual Serial"))
+            mFoundEnttecStrings = true;
     }
 
     /*
      * Only go further if we have in fact found evidence that this is the right device.
      */
 
-    // TODO: add back in serialbuffer and search?
     if (mFoundEnttecStrings) {
-#if 0
-        r = libusb_get_string_descriptor_ascii(mHandle, dd.iSerialNumber,
-            (uint8_t*)mSerialBuffer, sizeof mSerialBuffer);
-        if (r < 0) {
-            return r;
+        myfile.open (port_name);
+
+        if (!myfile.is_open()) {            
+            std::clog << "can't open port_name: " << port_name << "\n";
+            return TEENSY4DEVICE_PORT_WONT_OPEN;
         }
-#endif
-        int port;
 
-        // TODO: get this string using libusbp instead of setting manually
-        myfile.open ("/dev/cu.usbmodem76633301");
-
-        // TODO: appropriate return code
-        if (!myfile.is_open())
-            return -1;
-
-        myfile << "test";
+        // debug: send a test string so we know the connection is good
+        // myfile << "test";
     }
 
     return 0;
