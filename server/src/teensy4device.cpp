@@ -188,7 +188,8 @@ int Teensy4Device::open()
         // myfile << "test";
     }
 
-    return 0;
+    return libusb_get_string_descriptor_ascii(mHandle, dd.iSerialNumber, 
+        (uint8_t*)mSerialBuffer, sizeof mSerialBuffer);
 }
 
 // TODO: check for file open?
