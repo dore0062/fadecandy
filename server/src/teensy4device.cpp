@@ -31,39 +31,14 @@
 #include <fstream>
 
 // TODO: do we need flush?
-// TODO: add describe() to look for numLights?
-
-// TODO: pass in numLights to constructor to malloc correct size buffer (fcdevice and DMX don't need this as they are assumed to have the same size buffer)
-//const int NUM_LIGHTS = (128*64);
-const int NUM_LIGHTS = (128*64);
 
 Teensy4Device::Teensy4Device(libusb_device *device, bool verbose)
     : USBDevice(device, "teensy4", verbose),
       mFoundEnttecStrings(false),
       mConfigMap(0)
 {
-    mNumLights = NUM_LIGHTS;
-
     mSerialBuffer[0] = '\0';
     mSerialString = mSerialBuffer;
-
-    uint32_t bufferSize = sizeof(PixelFrame) * (mNumLights + 2); // Number of lights plus start and end frames
-    mFrameBuffer = (PixelFrame*)malloc(bufferSize);
-
-    memset(mFrameBuffer, 0, bufferSize);
-
-    // Initialize start and end frames
-    mFrameBuffer[0].value = START_FRAME;
-    mFrameBuffer[mNumLights + 1].value = END_FRAME;
-
-    // fill buffer with black
-    for(int i=0; i<mNumLights; i++) {
-        PixelFrame *outPtr = fbPixel(i);
-        outPtr->r = 0x00;
-        outPtr->g = 0x00;
-        outPtr->b = 0x00;
-        outPtr->l = 0xFF; // todo: fix so we actually pass brightness
-    }
 }
 
 Teensy4Device::~Teensy4Device()
@@ -199,9 +174,56 @@ bool Teensy4Device::probeAfterOpening()
     return mFoundEnttecStrings;
 }
 
+int Teensy4Device::getNumLedsFromMap()
+{
+    const Value &map = *mConfigMap;
+    unsigned largestIndex = 0;
+
+    for (unsigned i = 0, e = map.Size(); i != e; i++) {
+        const Value &inst = map[i];
+
+        if (inst.IsArray() && inst.Size() == 4) {
+            // Map a range from an OPC channel to our framebuffer
+
+            const Value &vChannel = inst[0u];
+            const Value &vFirstOPC = inst[1];
+            const Value &vFirstOut = inst[2];
+            const Value &vCount = inst[3];
+
+            if (vChannel.IsUint() && vFirstOPC.IsUint() && vFirstOut.IsUint() && vCount.IsInt()) {
+                unsigned firstOut = vFirstOut.GetUint();
+                int count = vCount.GetInt();
+                unsigned largestIndexInEntry;
+
+                if(count > 0)
+                    largestIndexInEntry = firstOut + count;
+                else
+                    largestIndexInEntry = firstOut;
+
+                if(largestIndexInEntry > largestIndex)
+                    largestIndex = largestIndexInEntry;
+
+                std::clog << "largestIndexInEntry: " << largestIndexInEntry << "\n";
+            }
+        }
+    }
+    std::clog << "largestIndex: " << largestIndex << "\n";
+    return largestIndex;
+}
+
 void Teensy4Device::loadConfiguration(const Value &config)
 {
     mConfigMap = findConfigMap(config);
+
+    // at this point, we have the map and can know how many LEDs to send out
+    mNumLights = 0;
+
+    if (!mConfigMap) {
+        // No mapping defined yet. This device is inactive.
+        return;
+    }
+
+    mNumLights = getNumLedsFromMap(); 
 }
 
 std::string Teensy4Device::getName()
@@ -271,6 +293,27 @@ void Teensy4Device::opcSetPixelColors(const OPC::Message &msg)
     if (!mConfigMap) {
         // No mapping defined yet. This device is inactive.
         return;
+    }
+
+    // the first time this runs after the map has been set, the framebuffer needs to be allocated
+    if(!mFrameBuffer) {
+        uint32_t bufferSize = sizeof(PixelFrame) * (mNumLights + 2); // Number of lights plus start and end frames
+        mFrameBuffer = (PixelFrame*)malloc(bufferSize);
+
+        memset(mFrameBuffer, 0, bufferSize);
+
+        // Initialize start and end frames
+        mFrameBuffer[0].value = START_FRAME;
+        mFrameBuffer[mNumLights + 1].value = END_FRAME;
+
+        // fill buffer with black
+        for(int i=0; i<mNumLights; i++) {
+            PixelFrame *outPtr = fbPixel(i);
+            outPtr->r = 0x00;
+            outPtr->g = 0x00;
+            outPtr->b = 0x00;
+            outPtr->l = 0xFF;
+        }
     }
 
     const Value &map = *mConfigMap;
@@ -356,6 +399,3 @@ void Teensy4Device::opcMapPixelColors(const OPC::Message &msg, const Value &inst
         std::clog << "Unsupported JSON mapping instruction: " << buffer.GetString() << "\n";
     }
 }
-
-
-

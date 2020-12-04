@@ -85,4 +85,5 @@ private:
 
     void opcSetPixelColors(const OPC::Message &msg);
     void opcMapPixelColors(const OPC::Message &msg, const Value &inst);
+    int getNumLedsFromMap();
 };
