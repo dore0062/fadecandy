@@ -27,6 +27,7 @@
 #include "fcdevice.h"
 #include "version.h"
 #include "teensy4device.h"
+#include "ft232hdevice.h"
 #include "enttecdmxdevice.h"
 #include <ctype.h>
 #include <iostream>
@@ -196,6 +197,9 @@ void FCServer::usbDeviceArrived(libusb_device *device)
 
     } else if (Teensy4Device::probe(device)) {
         dev = new Teensy4Device(device, mVerbose);
+
+    } else if (Ft232hDevice::probe(device)) {
+        dev = new Ft232hDevice(device, mVerbose);
 
     } else if (EnttecDMXDevice::probe(device)) {
         dev = new EnttecDMXDevice(device, mVerbose);
