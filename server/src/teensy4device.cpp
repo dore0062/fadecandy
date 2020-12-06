@@ -39,6 +39,8 @@ Teensy4Device::Teensy4Device(libusb_device *device, bool verbose)
 {
     mSerialBuffer[0] = '\0';
     mSerialString = mSerialBuffer;
+
+    mFrameBuffer = NULL;
 }
 
 Teensy4Device::~Teensy4Device()
@@ -46,7 +48,8 @@ Teensy4Device::~Teensy4Device()
     if (myfile.is_open())
         myfile.close();
 
-    free(mFrameBuffer);
+    if(mFrameBuffer)
+        free(mFrameBuffer);
 }
 
 bool Teensy4Device::probe(libusb_device *device)
