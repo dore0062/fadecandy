@@ -25,22 +25,12 @@
 #include "usbdevice.h"
 #include "opc.h"
 #include <set>
-#include <sstream>
-#include <iostream>
-#include <fstream>
 
-// starts at -100 to not overlap with range of libusb_error
-enum teensy4DeviceError {
-    TEENSY4DEVICE_PORTNAME_NOT_READY = -100,
-    TEENSY4DEVICE_PORT_WONT_OPEN = -101,
-    TEENSY4DEVICE_DEVICE_WONT_OPEN = -102
-};
-
-class Teensy4Device : public USBDevice
+class Ft232hDevice : public USBDevice
 {
 public:
-    Teensy4Device(libusb_device *device, bool verbose);
-    virtual ~Teensy4Device();
+    Ft232hDevice(libusb_device *device, bool verbose);
+    virtual ~Ft232hDevice();
 
     static bool probe(libusb_device *device);
 
@@ -54,6 +44,7 @@ public:
     void writeDMXPacket();
 
 private:
+    static const unsigned OUT_ENDPOINT = 2;
     static const uint32_t START_FRAME = 0x00000000;
     static const uint32_t END_FRAME = 0xFFFFFFFF;
     static const uint32_t BRIGHTNESS_MASK = 0xE0;
@@ -71,18 +62,29 @@ private:
         uint32_t value;
     };
 
-    std::ofstream myfile;
+    struct Transfer {
+        Transfer(Ft232hDevice *device, void *buffer, int length);
+        ~Transfer();
+        libusb_transfer *transfer;
+        bool finished;
+    };
+
     char mSerialBuffer[256];
-    bool mFoundEnttecStrings;
+    bool mFoundUsbStrings;
     const Value *mConfigMap;
     PixelFrame* mFrameBuffer;
     uint32_t mNumLights;
+    std::set<Transfer*> mPending;
 
     // buffer accessor
     PixelFrame *fbPixel(unsigned num) {
         return &mFrameBuffer[num + 1];
     }
 
+    void submitTransfer(Transfer *fct);
+    static LIBUSB_CALL void completeTransfer(struct libusb_transfer *transfer);
+
     void opcSetPixelColors(const OPC::Message &msg);
     void opcMapPixelColors(const OPC::Message &msg, const Value &inst);
+    int getNumLedsFromMap();
 };
