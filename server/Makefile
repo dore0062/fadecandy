@@ -9,6 +9,7 @@ CPP_FILES += \
 	src/usbdevice.cpp \
 	src/fcdevice.cpp \
 	src/teensy4device.cpp \
+	src/ft232hdevice.cpp \
 	src/enttecdmxdevice.cpp \
 	src/fcserver.cpp \
 	src/version.cpp \
