@@ -48,7 +48,10 @@ Ft232hDevice::Ft232hDevice(libusb_device *device, bool verbose)
     mSerialBuffer[0] = '\0';
     mSerialString = mSerialBuffer;
 
-    mFrameBuffer = NULL;
+    mConfigMapParallelMode = false;
+
+    memset(mFrameBufferParallel, 0, sizeof(PixelFrame*)*8);
+    mFrameBufferParallelCombined = NULL;
 }
 
 Ft232hDevice::~Ft232hDevice()
@@ -63,8 +66,13 @@ Ft232hDevice::~Ft232hDevice()
         libusb_cancel_transfer(fct->transfer);
     }
 
-    if(mFrameBuffer)
-        free(mFrameBuffer);
+    if(mFrameBufferParallelCombined)
+        free(mFrameBufferParallelCombined);
+
+    for(unsigned i=0; i<8; i++) {
+        if(mFrameBufferParallel[i])
+            free(mFrameBufferParallel[i]);
+    }
 }
 
 bool Ft232hDevice::probe(libusb_device *device)
@@ -161,10 +169,30 @@ bool Ft232hDevice::probeAfterOpening()
     return mFoundUsbStrings;
 }
 
-int Ft232hDevice::getNumLedsFromMap()
+int Ft232hDevice::getNumLedsFromMap(const Value &inst)
 {
-    const Value &map = *mConfigMap;
+    const Value &map = inst;
     unsigned largestIndex = 0;
+
+    // handle a nested map differently, call this function again with the nested maps
+    const Value &nestedMap = map[0u];
+    if(nestedMap[0u].IsArray() && nestedMap[0u].Size() == 4) {
+        std::clog << "nestedMap is array of arrays" << "\n";
+
+        unsigned parallelLargestIndex = 0;
+
+        for(unsigned i = 0, e = map.Size(); i != e; i++) {
+            unsigned largestIndexInParallelChain = getNumLedsFromMap(map[i]);
+
+            if(largestIndexInParallelChain > parallelLargestIndex)
+                parallelLargestIndex = largestIndexInParallelChain;
+
+            std::clog << "largestIndexInParallelChain[" << i << "]: " << largestIndexInParallelChain << "\n";
+        }
+
+        std::clog << "parallelLargestIndex: " << parallelLargestIndex << "\n";
+        return parallelLargestIndex;
+    }
 
     for (unsigned i = 0, e = map.Size(); i != e; i++) {
         const Value &inst = map[i];
@@ -210,7 +238,14 @@ void Ft232hDevice::loadConfiguration(const Value &config)
         return;
     }
 
-    mNumLights = getNumLedsFromMap(); 
+    const Value &map0 = *mConfigMap;
+    const Value &map = map0[0u];
+    if(map[0u].IsArray() && map[0u].Size() == 4) {
+        std::clog << "Map is array of arrays" << "\n";
+        mConfigMapParallelMode = true;
+    }
+
+    mNumLights = getNumLedsFromMap(*mConfigMap);
 }
 
 std::string Ft232hDevice::getName()
@@ -275,8 +310,38 @@ void Ft232hDevice::writeDMXPacket()
      * TODO: We should probably throttle this so that we don't send messages
      *      faster than the device can keep up!
      */
+    if(!mConfigMapParallelMode) {
+        submitTransfer(new Transfer(this, (char*)&mFrameBufferParallel[0][0], sizeof(PixelFrame) * (mNumLights + 2)));
+    } else {
+        // assemble mFrameBufferParallelCombined
+        unsigned index = 0;
+        for(int i=0; i<mNumLights + 2; i++) {
+            uint32_t inWord[8];
+            uint8_t outByte;
 
-    submitTransfer(new Transfer(this, (char*)&mFrameBuffer[0], sizeof(PixelFrame) * (mNumLights + 2)));
+            // load 8 parallel words, in the same order they'll be shifted out in parallel
+            for(int j=0; j<8; j++) {
+                inWord[j] = (mFrameBufferParallel[j][i].gbc << 24) |
+                            (mFrameBufferParallel[j][i].r << 16) |
+                            (mFrameBufferParallel[j][i].g << 8) |
+                            (mFrameBufferParallel[j][i].b << 0);
+            }
+
+            // write data for 8 parallel pixels across 32 bytes
+            for(int j=0; j<32; j++) {
+                outByte = 0;
+                for(int k=0; k<8; k++) {
+                    if(inWord[k] & (1<<31))
+                        outByte |= (1 << k);
+                    inWord[k] <<= 1;
+                }
+
+                mFrameBufferParallelCombined[index++] = outByte;
+            }
+        }
+
+        submitTransfer(new Transfer(this, (char*)&mFrameBufferParallelCombined[0], (sizeof(PixelFrame) * (mNumLights + 2))*8));
+    }
 }
 
 // TODO: add custom FCDevice::writeMessage(const OPC::Message &msg) to get "device_pixels" message like fcdevice?
@@ -321,49 +386,108 @@ void Ft232hDevice::opcSetPixelColors(const OPC::Message &msg)
         return;
     }
 
-    // the first time this runs after the map has been set, the framebuffer needs to be allocated
-    if(!mFrameBuffer) {
-        uint32_t bufferSize = sizeof(PixelFrame) * (mNumLights + 2); // Number of lights plus start and end frames
-        mFrameBuffer = (PixelFrame*)malloc(bufferSize);
+    // the first time this runs after the map has been set, the framebuffer(s) needs to be allocated
+    if(!mFrameBufferParallel[0]) {
+        if(!mConfigMapParallelMode) {
+            // allocate 1x size framebuffer
+            uint32_t bufferSize = sizeof(PixelFrame) * (mNumLights + 2); // Number of lights plus start and end frames
+            mFrameBufferParallel[0] = (PixelFrame*)malloc(bufferSize);
 
-        std::clog << "mFrameBuffer: " << mFrameBuffer << "\n";
+            std::clog << "mFrameBufferParallel[0]: " << mFrameBufferParallel[0] << "\n";
 
-        memset(mFrameBuffer, 0, bufferSize);
+            memset(mFrameBufferParallel[0], 0, bufferSize);
 
-        // Initialize start and end frames
-        mFrameBuffer[0].value = START_FRAME;
-        mFrameBuffer[mNumLights + 1].value = END_FRAME;
+            // Initialize start and end frames
+            mFrameBufferParallel[0][0].littleEndianValue = START_FRAME;
+            mFrameBufferParallel[0][mNumLights + 1].littleEndianValue = END_FRAME;
 
-        // fill buffer with black
-        for(int i=0; i<mNumLights; i++) {
-            PixelFrame *outPtr = fbPixel(i);
-            outPtr->r = 0x00;
-            outPtr->g = 0x00;
-            outPtr->b = 0x00;
-            outPtr->l = 0xFF;
+            // fill buffer with black
+            for(int i=0; i<mNumLights; i++) {
+                PixelFrame *outPtr = fbPixelParallel(0, i);
+                outPtr->r = 0x00;
+                outPtr->g = 0x00;
+                outPtr->b = 0x00;
+                outPtr->gbc = 0xFF;
+            }
+        } else {
+            // allocate 8x size framebuffer, and 8x parallel frames
+            uint32_t bufferSize = (sizeof(PixelFrame) * (mNumLights + 2))*8; // Number of lights plus start and end frames
+            mFrameBufferParallelCombined = (uint8_t*)malloc(bufferSize);
+
+            std::clog << "mFrameBufferParallelCombined: " << (void*)mFrameBufferParallelCombined << "\n";
+
+            memset(mFrameBufferParallelCombined, 0, bufferSize);
+
+            // Initialize start and end frames
+
+            // set first 32 bytes to 0xFF for start frame across 8 channels
+            for(unsigned i=0; i<32; i++) {
+                mFrameBufferParallelCombined[i] = 0xFF;
+            }
+
+            // set last 32 bytes to 0x00 for start frame across 8 channels
+            for(unsigned i=0; i<32; i++) {
+                mFrameBufferParallelCombined[i + (mNumLights+1)*8] = 0x00;
+            }
+
+            // fill buffer with black
+            for(int i=0; i<mNumLights; i++) {
+                unsigned pixelFrameIndex = (i+1)*32;
+
+                // set first GBC bits to 0xFF across 8 channels
+                for(int j=0; j<8; j++) {
+                    mFrameBufferParallelCombined[pixelFrameIndex + j] = 0xFF;
+                }
+
+                // remaining bits are already 0x00 for black, no need to set
+            }
+
+            // allocate 8x parallel frames
+            bufferSize = sizeof(PixelFrame) * (mNumLights + 2);
+
+            for(int i=0; i<8; i++) {
+                mFrameBufferParallel[i] = (PixelFrame*)malloc(bufferSize);
+
+                std::clog << "mFrameBufferParallel[" << i << "]: " << mFrameBufferParallel[i] << "\n";
+
+                memset(mFrameBufferParallel[i], 0, bufferSize);
+
+                // Initialize start and end frames
+                mFrameBufferParallel[i][0].littleEndianValue = START_FRAME;
+                mFrameBufferParallel[i][mNumLights + 1].littleEndianValue = END_FRAME;
+
+                // fill buffer with black
+                for(int j=0; j<mNumLights; j++) {
+                    PixelFrame *outPtr = fbPixelParallel(i, j);
+                    outPtr->r = 0x00;
+                    outPtr->g = 0x00;
+                    outPtr->b = 0x00;
+                    outPtr->gbc = 0xFF;
+                }
+            }
         }
     }
 
-    if(!mFrameBuffer) {
-        std::clog << "mFrameBuffer == 0\n";
-    }
-
-#if 0
-    const Value &map0 = *mConfigMap;
-    const Value &map = map0[0u];
-    if(map[0u].IsArray() && map[0u].Size() == 4) {
-        std::clog << "Map is array of arrays" << "\n";
-    }
-#else
     const Value &map = *mConfigMap;
-#endif
 
-    for (unsigned i = 0, e = map.Size(); i != e; i++) {
-        opcMapPixelColors(msg, map[i]);
+    if(!mConfigMapParallelMode) {
+        for (unsigned i = 0, e = map.Size(); i != e; i++) {
+            opcMapPixelColors(msg, map[i], 0);
+        }
+    } else {
+        // loop through 
+        // TODO: limit to 8 channels to avoid exceeding memory bounds, elsewhere too
+        for (unsigned j = 0, e1 = map.Size(); j != e1; j++) {
+            const Value &nestedMap = map[j];
+
+            for (unsigned i = 0, e = nestedMap.Size(); i != e; i++) {
+                opcMapPixelColors(msg, nestedMap[i], j);
+            }
+        }
     }
 }
 
-void Ft232hDevice::opcMapPixelColors(const OPC::Message &msg, const Value &inst)
+void Ft232hDevice::opcMapPixelColors(const OPC::Message &msg, const Value &inst, unsigned parallelChannel)
 {
     /*
      * Parse one JSON mapping instruction, and copy any relevant parts of 'msg'
@@ -413,12 +537,12 @@ void Ft232hDevice::opcMapPixelColors(const OPC::Message &msg, const Value &inst)
             const uint8_t *inPtr = msg.data + (firstOPC * 3);
             unsigned outIndex = firstOut;
             while (count--) {
-                PixelFrame *outPtr = fbPixel(outIndex);
+                PixelFrame *outPtr = fbPixelParallel(parallelChannel, outIndex);
                 outIndex += direction;
                 outPtr->r = inPtr[0];
                 outPtr->g = inPtr[1];
                 outPtr->b = inPtr[2];
-                outPtr->l = 0xFF; // todo: fix so we actually pass brightness
+                outPtr->gbc = 0xFF; // todo: fix so we actually pass brightness
                 inPtr += 3;
             }
 

@@ -45,21 +45,23 @@ public:
 
 private:
     static const unsigned OUT_ENDPOINT = 2;
+    static const uint32_t BRIGHTNESS_MASK = 0xE0;
+
     static const uint32_t START_FRAME = 0x00000000;
     static const uint32_t END_FRAME = 0xFFFFFFFF;
-    static const uint32_t BRIGHTNESS_MASK = 0xE0;
 
     union PixelFrame
     {
         struct
         {
-            uint8_t l;
+            uint8_t gbc;
             uint8_t r;
             uint8_t g;
             uint8_t b;
         };
 
-        uint32_t value;
+        // careful when trying to use this, "gbc" is in the lowest bits, "b" in the highest bits
+        uint32_t littleEndianValue;
     };
 
     struct Transfer {
@@ -72,19 +74,20 @@ private:
     char mSerialBuffer[256];
     bool mFoundUsbStrings;
     const Value *mConfigMap;
-    PixelFrame* mFrameBuffer;
+    bool mConfigMapParallelMode;
+    PixelFrame* mFrameBufferParallel[8];
+    uint8_t* mFrameBufferParallelCombined;
     uint32_t mNumLights;
     std::set<Transfer*> mPending;
 
-    // buffer accessor
-    PixelFrame *fbPixel(unsigned num) {
-        return &mFrameBuffer[num + 1];
+    PixelFrame *fbPixelParallel(unsigned channel, unsigned num) {
+        return &mFrameBufferParallel[channel][num + 1];
     }
 
     void submitTransfer(Transfer *fct);
     static LIBUSB_CALL void completeTransfer(struct libusb_transfer *transfer);
 
     void opcSetPixelColors(const OPC::Message &msg);
-    void opcMapPixelColors(const OPC::Message &msg, const Value &inst);
-    int getNumLedsFromMap();
+    void opcMapPixelColors(const OPC::Message &msg, const Value &inst, unsigned parallelChannel);
+    int getNumLedsFromMap(const Value &inst);
 };
