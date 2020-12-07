@@ -1,5 +1,5 @@
 /*
- * Fadecandy driver for the Enttec DMX USB Pro.
+ * Fadecandy driver for the FT232H with 8x parallel SPI driving circuit
  * 
  * Copyright (c) 2013 Micah Elizabeth Scott
  * 
@@ -27,7 +27,6 @@
 #include "opc.h"
 #include <sstream>
 #include <iostream>
-
 
 Ft232hDevice::Transfer::Transfer(Ft232hDevice *device, void *buffer, int length)
     : transfer(libusb_alloc_transfer(0)), finished(false)
