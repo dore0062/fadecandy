@@ -8,7 +8,10 @@ CPP_FILES += \
 	src/tcpnetserver.cpp \
 	src/usbdevice.cpp \
 	src/fcdevice.cpp \
+	src/teensy4device.cpp \
+	src/ft232hdevice.cpp \
 	src/enttecdmxdevice.cpp \
+	src/smartmatrixdevice.cpp \
 	src/fcserver.cpp \
 	src/version.cpp \
 	src/tinythread.cpp \
@@ -41,9 +44,9 @@ VERSION := $(shell git describe --match "fcserver-*")
 CXXFLAGS += -DFCSERVER_VERSION=$(VERSION)
 
 ifeq ($(UNAME), Darwin)
-	# Mac OS X (32-bit build)
-	LDFLAGS += -m32
-	CPPFLAGS += -m32 -DHAVE_POLL_H
+	# Mac OS X (64-bit build)
+	LDFLAGS += -m64
+	CPPFLAGS += -m64 -DHAVE_POLL_H
 
 	ifeq ("$(shell which llvm-gcc)", "")
 		# We want to support all the way back to OS 10.6 (Snow Leopard), which used gcc
@@ -116,6 +119,83 @@ else
 endif
 
 ###########################################################################
+# Built-in libusbp
+
+C_FILES += \
+	libusbp/src/async_in_pipe.c \
+	libusbp/src/error.c \
+	libusbp/src/error_hresult.c \
+	libusbp/src/find_device.c \
+	libusbp/src/list.c \
+	libusbp/src/pipe_id.c \
+	libusbp/src/string.c
+
+ifeq ($(UNAME), Darwin)
+	# Mac OS X
+
+	C_FILES += \
+		libusbp/src/mac/async_in_transfer_mac.c \
+		libusbp/src/mac/device_mac.c \
+		libusbp/src/mac/error_mac.c \
+		libusbp/src/mac/generic_interface_mac.c \
+		libusbp/src/mac/generic_handle_mac.c \
+		libusbp/src/mac/iokit_mac.c \
+		libusbp/src/mac/list_mac.c \
+		libusbp/src/mac/serial_port_mac.c
+
+	LIBS += -framework CoreFoundation -framework IOKit -lobjc
+	CPPFLAGS += -DOS_DARWIN -DTHREADS_POSIX -DPOLL_NFDS_TYPE=nfds_t \
+		-DLIBUSB_CALL= -DDEFAULT_VISIBILITY= -DHAVE_GETTIMEOFDAY
+	CLEAN_FILES += libusbp/src/mac/*.d libusbp/src/mac/*.o
+endif
+
+ifeq ($(UNAME), Linux)
+	# Linux
+
+	C_FILES += \
+		libusbp/src/linux/list_linux.c \
+		libusbp/src/linux/device_linux.c \
+		libusbp/src/linux/generic_interface_linux.c \
+		libusbp/src/linux/generic_handle_linux.c \
+		libusbp/src/linux/error_linux.c \
+		libusbp/src/linux/udev_linux.c \
+		libusbp/src/linux/usbfd_linux.c \
+		libusbp/src/linux/async_in_transfer_linux.c \
+		libusbp/src/linux/serial_port_linux.c
+
+	LIBS += -lpthread -lrt
+	CPPFLAGS += -DOS_LINUX -DTHREADS_POSIX -DPOLL_NFDS_TYPE=nfds_t \
+		-DLIBUSB_CALL= -DDEFAULT_VISIBILITY= -DHAVE_GETTIMEOFDAY -DHAVE_POLL_H \
+		-DHAVE_ASM_TYPES_H -DHAVE_SYS_SOCKET_H -DHAVE_LINUX_NETLINK_H -DHAVE_LINUX_FILTER_H
+	CLEAN_FILES += libusbp/src/linux/*.d libusbp/src/linux/*.o
+endif
+
+ifneq ("$(MINGW)", "")
+	# Windows
+
+	C_FILES += \
+		libusbp/src/windows/error_windows.c \
+		libusbp/src/windows/device_windows.c \
+		libusbp/src/windows/interface_windows.c \
+		libusbp/src/windows/device_instance_id_windows.c \
+		libusbp/src/windows/generic_interface_windows.c \
+		libusbp/src/windows/list_windows.c \
+		libusbp/src/windows/generic_handle_windows.c \
+		libusbp/src/windows/async_in_transfer_windows.c \
+		libusbp/src/windows/serial_port_windows.c
+		# TODO: copy pre-populated info.rc into included directory
+
+	LIBS += -lws2_32
+	CPPFLAGS += -DOS_WINDOWS -DPOLL_NFDS_TYPE=int -DDEFAULT_VISIBILITY= -DHAVE_GETTIMEOFDAY
+	CLEAN_FILES += libusbp/src/windows/*.d libusbp/src/windows/*.o
+endif
+
+# Requires libusbp_config.h.in to be manually edited and copied into /src - normally CMake edits and copies this to /build/src
+INCLUDES += -Ilibusbp/include -Ilibusbp/src
+CLEAN_FILES += \
+	libusbp/src/*.d libusbp/src/*.o
+
+###########################################################################
 # Built-in libusbx
 
 C_FILES += \
@@ -178,7 +258,7 @@ CLEAN_FILES += \
 CPPFLAGS += -MMD $(INCLUDES)
 
 # Compiler options for C++ only
-CXXFLAGS += -felide-constructors -fno-exceptions -fno-rtti
+CXXFLAGS += -felide-constructors -fno-rtti
 
 OBJS := $(CPP_FILES:.cpp=.o) $(C_FILES:.c=.o)
 

@@ -26,7 +26,10 @@
 #include "apa102spidevice.h"
 #include "fcdevice.h"
 #include "version.h"
+#include "teensy4device.h"
+#include "ft232hdevice.h"
 #include "enttecdmxdevice.h"
+#include "smartmatrixdevice.h"
 #include <ctype.h>
 #include <iostream>
 
@@ -193,8 +196,17 @@ void FCServer::usbDeviceArrived(libusb_device *device)
     if (FCDevice::probe(device)) {
         dev = new FCDevice(device, mVerbose);
 
+    } else if (Teensy4Device::probe(device)) {
+        dev = new Teensy4Device(device, mVerbose);
+
+    } else if (Ft232hDevice::probe(device)) {
+        dev = new Ft232hDevice(device, mVerbose);
+
     } else if (EnttecDMXDevice::probe(device)) {
         dev = new EnttecDMXDevice(device, mVerbose);
+
+    } else if (SMDevice::probe(device)) {
+        dev = new SMDevice(device, mVerbose);
 
     } else {
         return;
@@ -215,6 +227,21 @@ void FCServer::usbDeviceArrived(libusb_device *device)
                         // Try again in ~100ms or so.
                         mPollForDevicesOnce = true;
                     #endif
+                    break;
+
+                case TEENSY4DEVICE_PORTNAME_NOT_READY:
+                    // Try again in ~100ms or so.
+                    mPollForDevicesOnce = true;
+                    break;
+
+                case TEENSY4DEVICE_PORT_WONT_OPEN:
+                    // Try again in ~100ms or so.
+                    std::clog << "Error opening Teensy 4 Port\n";
+                    break;
+
+                case TEENSY4DEVICE_DEVICE_WONT_OPEN:
+                    // Try again in ~100ms or so.
+                    std::clog << "Error opening Teensy 4 Device\n";
                     break;
 
                 default:
