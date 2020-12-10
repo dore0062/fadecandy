@@ -29,6 +29,7 @@
 #include "teensy4device.h"
 #include "ft232hdevice.h"
 #include "enttecdmxdevice.h"
+#include "smartmatrixdevice.h"
 #include <ctype.h>
 #include <iostream>
 
@@ -203,6 +204,9 @@ void FCServer::usbDeviceArrived(libusb_device *device)
 
     } else if (EnttecDMXDevice::probe(device)) {
         dev = new EnttecDMXDevice(device, mVerbose);
+
+    } else if (SMDevice::probe(device)) {
+        dev = new SMDevice(device, mVerbose);
 
     } else {
         return;

@@ -11,6 +11,7 @@ CPP_FILES += \
 	src/teensy4device.cpp \
 	src/ft232hdevice.cpp \
 	src/enttecdmxdevice.cpp \
+	src/smartmatrixdevice.cpp \
 	src/fcserver.cpp \
 	src/version.cpp \
 	src/tinythread.cpp \
