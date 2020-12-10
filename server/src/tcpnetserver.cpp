@@ -25,7 +25,7 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include "netserver.h"
+#include "tcpnetserver.h"
 #include "version.h"
 #include "libwebsockets.h"
 #include "rapidjson/stringbuffer.h"
@@ -34,13 +34,13 @@
 #include <algorithm>
 
 
-NetServer::NetServer(OPC::callback_t opcCallback, jsonCallback_t jsonCallback,
+TcpNetServer::TcpNetServer(OPC::callback_t opcCallback, jsonCallback_t jsonCallback,
     void *context, bool verbose)
     : mOpcCallback(opcCallback), mJsonCallback(jsonCallback),
       mUserContext(context), mThread(0), mVerbose(verbose)
 {}
 
-bool NetServer::start(const char *host, int port)
+bool TcpNetServer::start(const char *host, int port)
 {
     const int llNormal = LLL_ERR | LLL_WARN;
     const int llVerbose = llNormal | LLL_NOTICE;
@@ -89,10 +89,59 @@ bool NetServer::start(const char *host, int port)
     return true;
 }
 
-void NetServer::threadFunc(void *arg)
+bool TcpNetServer::startRelay(const char *host, int port)
+{
+    const int llNormal = LLL_ERR | LLL_WARN;
+    const int llVerbose = llNormal | LLL_NOTICE;
+
+    static struct libwebsocket_protocols protocols[] = {
+        // Only one protocol for now. Handles HTTP as well as our default WebSockets protocol.
+        {
+            "fcserver-relay",       // Name
+            lwsRelayCallback,       // Callback
+            sizeof(Client),         // Protocol-specific data size
+            sizeof(OPC::Message),   // Max frame size / rx buffer
+        },
+
+        { NULL, NULL, 0, 0 }    // terminator
+    };
+
+    struct lws_context_creation_info info;
+    memset(&info, 0, sizeof info);
+    info.gid = -1;
+    info.uid = -1;
+    info.host = host;
+    info.port = port;
+    info.protocols = protocols;
+    info.user = this;
+
+    // Quieter during create_context, since it's kind of chatty.
+    lws_set_log_level(llNormal, NULL);
+
+    struct libwebsocket_context *context = libwebsocket_create_context(&info);
+    if (!context) {
+        lwsl_err("libwebsocket init failed for relay\n");
+        return false;
+    }
+
+    // Maybe set up a more verbose log level now.
+    if (mVerbose) {
+        lws_set_log_level(llVerbose, NULL);
+    }
+
+    lwsl_notice("Relay Server listening on %s:%d\n", host ? host : "*", port);
+
+    // Note that we pass ownership of all libwebsockets state to this new thread.
+    // We shouldn't access it on the other threads afterwards.
+    mRelayThread = new tthread::thread(threadFunc, context);
+
+    return true;
+}
+
+void TcpNetServer::threadFunc(void *arg)
 {
     struct libwebsocket_context *context = (libwebsocket_context*) arg;
-    NetServer *self = (NetServer*) libwebsocket_context_user(context);
+    TcpNetServer *self = (TcpNetServer*) libwebsocket_context_user(context);
 
     /*
      * Mostly we're just handling incoming events from libwebsocket's poll(),
@@ -111,7 +160,7 @@ void NetServer::threadFunc(void *arg)
     libwebsocket_context_destroy(context);
 }
 
-int NetServer::lwsCallback(libwebsocket_context *context, libwebsocket *wsi,
+int TcpNetServer::lwsCallback(libwebsocket_context *context, libwebsocket *wsi,
     enum libwebsocket_callback_reasons reason, void *user, void *in, size_t len)
 {
     /*
@@ -124,7 +173,7 @@ int NetServer::lwsCallback(libwebsocket_context *context, libwebsocket *wsi,
      * from the 'http' directory. Our web UI interacts with the server via the public WebSockets API.
      */
 
-    NetServer *self = (NetServer*) libwebsocket_context_user(context);
+    TcpNetServer *self = (TcpNetServer*) libwebsocket_context_user(context);
     Client *client = (Client*) user;
 
     switch (reason) {
@@ -170,7 +219,48 @@ int NetServer::lwsCallback(libwebsocket_context *context, libwebsocket *wsi,
     return 0;
 }
 
-int NetServer::opcRead(libwebsocket_context *context, libwebsocket *wsi,
+int TcpNetServer::lwsRelayCallback(libwebsocket_context *context, libwebsocket *wsi,
+    enum libwebsocket_callback_reasons reason, void *user, void *in, size_t len)
+{
+    /*
+     * Protocol callback for libwebsockets.
+     *
+     * Until we have a reason to support a non-default WebSockets protocol, this handles
+     * everything: plain HTTP, Open Pixel Control, and WebSockets.
+     *
+     * For HTTP, this serves simple static HTML documents which are included at compile-time
+     * from the 'http' directory. Our web UI interacts with the server via the public WebSockets API.
+     */
+
+    TcpNetServer *self = (TcpNetServer*) libwebsocket_context_user(context);
+    Client *client = (Client*) user;
+
+    switch (reason) {
+        case LWS_CALLBACK_CLOSED:
+        case LWS_CALLBACK_CLOSED_HTTP:
+        case LWS_CALLBACK_DEL_POLL_FD:
+            if (client && client->opcBuffer) {
+                free(client->opcBuffer);
+                client->opcBuffer = NULL;
+            }
+            if (self->mRelayClients.erase(wsi) > 0) {
+                lwsl_notice("Relay client disconnected!\n");
+            }
+            break;
+
+        case LWS_CALLBACK_ESTABLISHED:
+            lwsl_notice("Relay client connected!\n");
+            self->mRelayClients.insert(wsi);
+            break;
+
+        default:
+            break;
+    }
+
+    return 0;
+}
+
+int TcpNetServer::opcRead(libwebsocket_context *context, libwebsocket *wsi,
     Client &client, uint8_t *in, size_t len)
 {
     /*
@@ -286,7 +376,7 @@ int NetServer::opcRead(libwebsocket_context *context, libwebsocket *wsi,
     return 1;
 }
 
-bool NetServer::httpPathEqual(const char *a, const char *b)
+bool TcpNetServer::httpPathEqual(const char *a, const char *b)
 {
     // HTTP path comparison. Stop at '?' or '#', to ignore query/fragment portions.
     for (;;) {
@@ -303,7 +393,7 @@ bool NetServer::httpPathEqual(const char *a, const char *b)
     }
 }
 
-int NetServer::httpBegin(libwebsocket_context *context, libwebsocket *wsi,
+int TcpNetServer::httpBegin(libwebsocket_context *context, libwebsocket *wsi,
     Client &client, const char *path)
 {
     /*
@@ -353,7 +443,7 @@ int NetServer::httpBegin(libwebsocket_context *context, libwebsocket *wsi,
     return 0;
 }
 
-int NetServer::httpWrite(libwebsocket_context *context, libwebsocket *wsi, Client &client)
+int TcpNetServer::httpWrite(libwebsocket_context *context, libwebsocket *wsi, Client &client)
 {
     if (!client.httpBody) {
         return -1;
@@ -378,7 +468,7 @@ int NetServer::httpWrite(libwebsocket_context *context, libwebsocket *wsi, Clien
     return 0;
 }
 
-int NetServer::wsRead(libwebsocket_context *context, libwebsocket *wsi, Client &client, uint8_t *in, size_t len)
+int TcpNetServer::wsRead(libwebsocket_context *context, libwebsocket *wsi, Client &client, uint8_t *in, size_t len)
 {
     // If this frame is binary, it's an OPC message. Does it parse?
     if (lws_frame_is_binary(wsi)) {
@@ -423,14 +513,14 @@ int NetServer::wsRead(libwebsocket_context *context, libwebsocket *wsi, Client &
     return 0;
 }
 
-int NetServer::jsonReply(libwebsocket *wsi, rapidjson::Document &message)
+int TcpNetServer::jsonReply(libwebsocket *wsi, rapidjson::Document &message)
 {
     jsonBuffer_t buffer;
     jsonBufferPrepare(buffer, message);
     return jsonBufferSend(buffer, wsi);
 }
 
-void NetServer::jsonBufferPrepare(jsonBuffer_t &buffer, rapidjson::Value &value)
+void TcpNetServer::jsonBufferPrepare(jsonBuffer_t &buffer, rapidjson::Value &value)
 {
     // Pre-packet padding
     rapidjson::PutN<>(buffer, 0, LWS_SEND_BUFFER_PRE_PADDING);
@@ -443,14 +533,14 @@ void NetServer::jsonBufferPrepare(jsonBuffer_t &buffer, rapidjson::Value &value)
     rapidjson::PutN<>(buffer, 0, LWS_SEND_BUFFER_POST_PADDING);
 }
 
-int NetServer::jsonBufferSend(jsonBuffer_t &buffer, libwebsocket *wsi)
+int TcpNetServer::jsonBufferSend(jsonBuffer_t &buffer, libwebsocket *wsi)
 {
     const char *string = buffer.GetString() + LWS_SEND_BUFFER_PRE_PADDING;
     size_t len = buffer.Size() - LWS_SEND_BUFFER_PRE_PADDING - LWS_SEND_BUFFER_POST_PADDING;
     return libwebsocket_write(wsi, (unsigned char *) string, len, LWS_WRITE_TEXT);
 }
 
-void NetServer::flushBroadcastList()
+void TcpNetServer::flushBroadcastList()
 {
     // Send any pending broadcast packets. These are enqueued by other threads on a list
     // protected by mBroadcastMutex.
@@ -466,7 +556,7 @@ void NetServer::flushBroadcastList()
     mBroadcastMutex.unlock();
 }
 
-void NetServer::jsonBroadcast(rapidjson::Document &message)
+void TcpNetServer::jsonBroadcast(rapidjson::Document &message)
 {
     jsonBuffer_t *buffer = new jsonBuffer_t();
     jsonBufferPrepare(*buffer, message);
@@ -474,4 +564,23 @@ void NetServer::jsonBroadcast(rapidjson::Document &message)
     mBroadcastMutex.lock();
     mBroadcastList.push_back(buffer);
     mBroadcastMutex.unlock();
+}
+
+void TcpNetServer::relayMessage(OPC::Message &msg)
+{
+    if (mRelayClients.size()) {
+        int headerLen = 4;
+        int bufferLen = headerLen + msg.length();
+        unsigned char buffer[bufferLen];
+        buffer[0] = (unsigned char)msg.channel;
+        buffer[1] = (unsigned char)msg.command;
+        buffer[2] = (unsigned char)msg.lenHigh;
+        buffer[3] = (unsigned char)msg.lenLow;
+        for (int i=0; i < msg.length(); i++) {
+            buffer[headerLen+i] = (unsigned char)msg.data[i];
+        }
+        for (std::set<libwebsocket*>::iterator cli = mRelayClients.begin(); cli != mRelayClients.end(); ++cli) {
+            libwebsocket_write(*cli, buffer, bufferLen, LWS_WRITE_BINARY);
+        }
+    }
 }

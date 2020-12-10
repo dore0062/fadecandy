@@ -3,7 +3,11 @@ Fadecandy: Server Configuration
 
 The Fadecandy Server is configured with a JSON object. There is a default configuration built-in, which you can see by running `fcserver -h`. A copy of this configuration is also included as [examples/config/default.json](https://github.com/scanlime/fadecandy/blob/master/examples/config/default.json).
 
-A new configuration file can be given to `fcserver` on the command line. You can use one of the examples as a starting point. Typically the default configuration will work for any single-controller setup. If you're using multiple controllers or there are other options you want to tweak, you'll want to create an fcserver configuration file for your project.
+A new configuration file can be given to `fcserver` on the command line in the following manner:
+
+` $ <path to fcserver> <path to config.json file> `
+
+You can use one of the examples as a starting point. Typically the default configuration will work for any single-controller setup. If you're using multiple controllers or there are other options you want to tweak, you'll want to create an fcserver configuration file for your project.
 
 Parts of the JSON config format are shared with the network protocols. For example, color correction data and device information are stored in a common format. Some parts of the JSON configuration file can be modified at runtime.
 
@@ -15,6 +19,7 @@ The configuration file is a JSON object. By default, it looks like this:
 ```
 {
     "listen": ["127.0.0.1", 7890],
+    "relay": NULL,
     "verbose": true,
 
     "color": {
@@ -36,6 +41,7 @@ The configuration file is a JSON object. By default, it looks like this:
 Name     | Summary
 -------- | -------------------------------------------------------
 listen   | What address and port should the server listen on?
+relay    | What address and port should the server relay messages to?
 verbose  | Does the server log anything except errors to the console?
 color    | Default global color correction settings
 devices  | List of configured devices
@@ -49,6 +55,13 @@ The "listen" configuration key must be a JSON array of the form [**host**, **por
 
 *Warning:* Do not run fcserver on an untrusted network. It has no built-in security provisions, so anyone on your network will have control of fcserver. Additionally, bugs in fcserver may compromise the security of your computer.
 
+Relay
+-----
+
+The "relay" configuration key is using the same format as the "listen" configuration key and allows clients to connect on a separate socket to receive a copy of the OPC messages the fcserver is handling.
+
+Relaying is disabled by default.
+
 Color
 -----
 
@@ -59,7 +72,7 @@ The default color configuration is:
 ```
 "color": {
     "gamma": 2.5,
-    "whitepoint": [0.98, 1.0, 1.0]
+    "whitepoint": [0.98, 1.0, 1.0],
     "linearSlope": 1.0,
     "linearCutoff": 0.0
 },
@@ -98,6 +111,8 @@ Supported mapping objects for Fadecandy devices:
     * The "Color channels" must be a 3-letter string, where each letter corresponds to one of the WS2811 outputs.
     * Each letter can be "r", "g", or "b" to choose the red, green, or blue channel respectively, or "l" to use the average luminosity.
 
+If the pixel count is negative, the output pixels are mapped in reverse order starting at the first output pixel index and decrementing the index for each successive pixel up to the absolute value of the pixel count.
+
 Other settings for Fadecandy devices:
 
 Name         | Values               | Default | Description
@@ -106,7 +121,7 @@ led          | true / false / null  | null    | Is the LED on, off, or under aut
 dither       | true / false         | true    | Is dithering enabled?
 interpolate  | true / false         | true    | Is inter-frame interpolation enabled?
 
-The following example config file supports two Fadecandy devices with distinct serial numbers. They both receive data from OPC channel #0. The first 512 pixels map to the first Fadecandy device. The next 64 pixels map to the entire first strand of the second Fadecandy device, and the next 32 pixels map to the beginning of the third strand with the color channels in Blue, Green, Red order.
+The following example config file supports two Fadecandy devices with distinct serial numbers. They both receive data from OPC channel #0. The first 512 pixels map to the first Fadecandy device. The next 64 pixels map to the entire first strand of the second Fadecandy device, the next 32 pixels map to the beginning of the third strand with the color channels in Blue, Green, Red order, and the next 32 pixels map to the end of the third strand in reverse order.
 
     {
         "listen": ["127.0.0.1", 7890],
@@ -132,6 +147,7 @@ The following example config file supports two Fadecandy devices with distinct s
                 "map": [
                     [ 0, 512, 0, 64 ],
                     [ 0, 576, 128, 32, "bgr" ]
+                    [ 0, 608, 191, -32 ]
                 ]
             }
         ]
@@ -180,3 +196,32 @@ Enttec DMX devices use a different format for their mapping objects:
     * Map a single OPC pixel to a single DMX channel
     * The "Pixel color" can be "r", "g", or "b" to sample a single color channel from the pixel, or "l" to use an average luminosity.
     * DMX channels are numbered from 1 to 512.
+* [ *Value*, *DMX Channel* ]
+    * Map a constant value to a DMX channel; good for configuration modes
+
+Using Open Pixel Control with the APA102/APA102C/SK9822 
+---------------------------------
+
+The Fadecandy server now has experimental support for the APA102 family of LEDs.
+
+APA102 devices can be configured in the same way as a Fadecandy device. For example:
+
+    {
+        "listen": ["127.0.0.1", 7890],
+        "verbose": true,
+
+        "devices": [
+            {
+                    "type": "apa102spi",
+                    "port": 0,
+                    "numLights": 144,
+                    "map": [ [ 0, 0, 0, 144 ] ]
+                ]
+            }
+        ]
+    }
+
+Supported mapping objects for APA102 devices:
+
+* [ *OPC Channel*, *First OPC Pixel*, *First output pixel*, *Pixel count* ]
+    * Map a contiguous range of pixels from the specified OPC channel to the current device

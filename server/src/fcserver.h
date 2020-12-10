@@ -1,18 +1,18 @@
 /*
  * Open Pixel Control server for Fadecandy
- * 
+ *
  * Copyright (c) 2013 Micah Elizabeth Scott
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of
  * this software and associated documentation files (the "Software"), to deal in
  * the Software without restriction, including without limitation the rights to
  * use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
  * the Software, and to permit persons to whom the Software is furnished to do so,
  * subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
  * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
@@ -24,8 +24,9 @@
 #pragma once
 #include "rapidjson/document.h"
 #include "opc.h"
-#include "netserver.h"
+#include "tcpnetserver.h"
 #include "usbdevice.h"
+#include "spidevice.h"
 #include <sstream>
 #include <vector>
 #include <libusb.h>
@@ -51,17 +52,20 @@ private:
 
     const Document& mConfig;
     const Value& mListen;
+    const Value& mRelay;
     const Value& mColor;
     const Value& mDevices;
     bool mVerbose;
     bool mPollForDevicesOnce;
 
-    NetServer mNetServer;
+    TcpNetServer mTcpNetServer;
     tthread::recursive_mutex mEventMutex;
-    tthread::thread *mUSBHotplugThread;    
+    tthread::thread *mUSBHotplugThread;
 
     std::vector<USBDevice*> mUSBDevices;
     struct libusb_context *mUSB;
+
+    std::vector<SPIDevice*> mSPIDevices;
 
     static void cbOpcMessage(OPC::Message &msg, void *context);
     static void cbJsonMessage(libwebsocket *wsi, rapidjson::Document &message, void *context);
@@ -75,6 +79,9 @@ private:
     bool usbHotplugPoll();
 
     static void usbHotplugThreadFunc(void *arg);
+
+    bool startSPI();
+    void openAPA102SPIDevice(uint32_t port, int numLights);
 
     // JSON event broadcasters
     void jsonConnectedDevicesChanged();
