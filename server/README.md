@@ -42,7 +42,7 @@ stripLength = SmartMatrix panel width
 numStrips = SmartMatrix panel height
 zigzag = false
 
-This has been tested on one MacOS 10.15.7 machine, and likely has issues compiling on other machines and operating systems.  Please get in contact through GitHub Issues or at [SmartMatrix Community](community.pixelmatix.com) if you have trouble or can help.
+This has been tested on one MacOS 10.15.7 machine, and likely has issues compiling on other machines and operating systems.  The major change made to add "teensy4" device support is the addition of [libusbp](https://github.com/pololu/libusbp), which has platform specific specific sections in the Makefile I somewhat blindly copied over.  Please get in contact through GitHub Issues or at [SmartMatrix Community](community.pixelmatix.com) if you have trouble or can help.
 
 ### Fadecandy Server Overview
 
