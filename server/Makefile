@@ -182,6 +182,7 @@ ifneq ("$(MINGW)", "")
 		libusbp/src/windows/generic_handle_windows.c \
 		libusbp/src/windows/async_in_transfer_windows.c \
 		libusbp/src/windows/serial_port_windows.c
+		# TODO: copy pre-populated info.rc into included directory
 
 	LIBS += -lws2_32
 	CPPFLAGS += -DOS_WINDOWS -DPOLL_NFDS_TYPE=int -DDEFAULT_VISIBILITY= -DHAVE_GETTIMEOFDAY
