@@ -25,11 +25,11 @@ zigzag = false
 
 ### SmartMatrix with Teensy 4.0/4.1
 
-This repo also has a new device class added to the server to add support for driving a Teensy 4.0/4.1 driving a SmartMatrix display.  This "teensy4" device uses a different prototcol than the Teensy 3.1/3.2 SmartMatrix device.  See `/examples/config/teensy4*.json` for examples of using the server.  The "teensy4" device is significantly different from the "fadecandy" device as it uses simple serial communication over USB CDC.  The Teensy 4 uses USB High Speed with a lot more bandwidth than the Teensy 3's USB Full Speed, so having an optimized protocol isn't as important.
+This repo also has a new device class added to the server to add support for driving a Teensy 4.0/4.1 driving a SmartMatrix display.  This "teensy4" device uses a different protocol than the Teensy 3.1/3.2 SmartMatrix device.  See `/examples/config/teensy4*.json` for examples of using the server.  The "teensy4" device is significantly different from the "fadecandy" device as it uses simple serial communication over USB CDC.  The Teensy 4 uses USB High Speed with a lot more bandwidth than the Teensy 3's USB Full Speed, so having an optimized protocol isn't as important.
 
-The Teensy 4 has enough CPU, RAM, and USB bandwith to transfer over 10,000 pixels at 60FPS, and refresh a HUB75 panel with 36-bit color, at 240Hz refresh rate.
+The Teensy 4 has enough CPU, RAM, and USB bandwidth to transfer over 10,000 pixels at 60FPS, and refresh a HUB75 panel with 36-bit color, at 240Hz refresh rate.
 
-While this device is fairly functinoal, there are still some unfinished features:
+While this device is fairly functional, there are still some unfinished features:
 
 - The "color" settings are ignored, the device just does simple color (gamma) correction using on on-device lookup table
 - You can't reorder the color channels, it's fixed as RGB order (alternate RGB order is probably of limited use for this device)
