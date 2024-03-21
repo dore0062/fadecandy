@@ -1,12 +1,12 @@
 [submodule "server/libusbx"]
 	path = server/libusbx
-	url = https://git.approximate.life/libusbx.git/
+	url = https://git.approximate.life/libusbx.git
 [submodule "server/libwebsockets"]
 	path = server/libwebsockets
-	url = https://git.approximate.life/libwebsockets.git/
+	url = https://git.approximate.life/libwebsockets.git
 [submodule "server/rapidjson"]
 	path = server/rapidjson
-	url = https://git.approximate.life/rapidjson.git/
+	url = https://git.approximate.life/rapidjson.git
 [submodule "server/libusbp"]
 	path = server/libusbp
 	url = https://github.com/pololu/libusbp.git
